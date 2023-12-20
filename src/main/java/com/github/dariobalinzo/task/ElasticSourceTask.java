@@ -70,6 +70,7 @@ public class ElasticSourceTask extends SourceTask {
     private final Map<String, Integer> sent = new HashMap<>();
     private ElasticRepository elasticRepository;
 
+    private String pivotCursor;
     private final List<DocumentFilter> documentFilters = new ArrayList<>();
 
     @Override
@@ -94,11 +95,12 @@ public class ElasticSourceTask extends SourceTask {
         topic = config.getString(ElasticSourceConnectorConfig.TOPIC_PREFIX_CONFIG);
         cursorSearchField = config.getString(ElasticSourceConnectorConfig.INCREMENTING_FIELD_NAME_CONFIG);
         Objects.requireNonNull(cursorSearchField, ElasticSourceConnectorConfig.INCREMENTING_FIELD_NAME_CONFIG
-                                                  + " conf is mandatory");
+                + " conf is mandatory");
         cursorField = new CursorField(cursorSearchField);
         secondaryCursorSearchField = config.getString(ElasticSourceConnectorConfig.SECONDARY_INCREMENTING_FIELD_NAME_CONFIG);
         secondaryCursorField = secondaryCursorSearchField == null ? null : new CursorField(secondaryCursorSearchField);
         pollingMs = Integer.parseInt(config.getString(ElasticSourceConnectorConfig.POLL_INTERVAL_MS_CONFIG));
+        pivotCursor = config.getString(ElasticSourceConnectorConfig.PIVOT_CURSOR);
 
         initConnectorFilters();
         initConnectorFieldConverter();
@@ -200,7 +202,7 @@ public class ElasticSourceTask extends SourceTask {
             for (String index : indices) {
                 if (!stopping.get()) {
                     logger.info("fetching from {}", index);
-                    Cursor lastValue = fetchLastOffset(index);
+                    Cursor lastValue = fetchLastOffset(index, pivotCursor);
                     logger.info("found last value {}", lastValue);
                     PageResult pageResult = secondaryCursorSearchField == null ?
                             elasticRepository.searchAfter(index, lastValue) :
@@ -221,6 +223,9 @@ public class ElasticSourceTask extends SourceTask {
     }
 
     private Cursor fetchLastOffset(String index) {
+        return this.fetchLastOffset(index,null);
+    }
+    private Cursor fetchLastOffset(String index, String pivotCursor) {
         //first we check in cache memory the last value
         if (lastCursor.get(index) != null) {
             return lastCursor.get(index);
@@ -233,6 +238,9 @@ public class ElasticSourceTask extends SourceTask {
             String secondaryCursor = (String) offset.get(POSITION_SECONDARY);
             return new Cursor(primaryCursor, secondaryCursor);
         } else {
+            if ( null != pivotCursor && !"".equals(pivotCursor.trim())) {
+                return new Cursor(pivotCursor, pivotCursor);
+            }
             return Cursor.empty();
         }
     }
@@ -246,7 +254,7 @@ public class ElasticSourceTask extends SourceTask {
                     secondaryCursorField,
                     elasticDocument
             );
-            String key = offsetSerializer.toStringOffset(
+            Object key = offsetSerializer.toMapOffset(
                     cursorField,
                     secondaryCursorField,
                     index,

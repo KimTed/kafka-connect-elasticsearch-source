@@ -41,6 +41,7 @@ public class ElasticSourceConnectorConfig extends AbstractConfig {
     public final static String ES_PORT_CONF = "es.port";
     private final static String ES_PORT_DOC = "ElasticSearch port";
     private final static String ES_PORT_DISPLAY = "ElasticSearch port";
+    private static final String ES_PORT_DEFAULT = "9200";
 
     public final static String ES_USER_CONF = "es.user";
     private final static String ES_USER_DOC = "Elasticsearch username";
@@ -150,6 +151,10 @@ public class ElasticSourceConnectorConfig extends AbstractConfig {
     public static final String NOP_FIELDNAME_CONVERTER = "nop";
     public static final String AVRO_FIELDNAME_CONVERTER = "avro";
 
+    public static final String PIVOT_CURSOR = "es.pivot.cursor";
+    private static final String PIVOT_CURSOR_DISPLAY = "Set for cursor";
+    public static final String PIVOT_CURSOR_DOC = "강제 설정 날짜 (mod_dttm)";
+
     public static final ConfigDef CONFIG_DEF = baseConfigDef();
 
     protected static ConfigDef baseConfigDef() {
@@ -185,7 +190,8 @@ public class ElasticSourceConnectorConfig extends AbstractConfig {
         ).define(
                 ES_PORT_CONF,
                 Type.STRING,
-                Importance.HIGH,
+                ES_PORT_DEFAULT,
+                Importance.MEDIUM,
                 ES_PORT_DOC,
                 DATABASE_GROUP,
                 ++orderInGroup,
@@ -367,6 +373,16 @@ public class ElasticSourceConnectorConfig extends AbstractConfig {
                 ++orderInGroup,
                 Width.MEDIUM,
                 SECONDARY_INCREMENTING_FIELD_NAME_DISPLAY
+        ).define(
+                PIVOT_CURSOR,
+                Type.STRING,
+                null,
+                Importance.LOW,
+                PIVOT_CURSOR_DOC,
+                MODE_GROUP,
+                ++orderInGroup,
+                Width.MEDIUM,
+                PIVOT_CURSOR_DISPLAY
         );
     }
 

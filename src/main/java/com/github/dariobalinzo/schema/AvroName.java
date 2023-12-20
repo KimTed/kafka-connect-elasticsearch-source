@@ -31,6 +31,6 @@ public class AvroName implements FieldNameConverter {
         if (!alphabetic) {
             elasticName = "avro" + elasticName;
         }
-        return elasticName.replaceAll("[^a-zA-Z0-9]", "");
+        return elasticName.replaceAll("[^a-zA-Z0-9_]", "");
     }
 }

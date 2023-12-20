@@ -19,6 +19,17 @@ public class OffsetSerializer {
         return result;
     }
 
+    public Map<String, String> toMapOffset(CursorField primaryCursor, CursorField secondaryCursor, String index, Map<String, Object> document) {
+        Map<String, String> result = new HashMap<>();
+        result.put("Index", index);
+        result.put("Id", (String)document.get("es-id"));
+        result.put("cursor", primaryCursor.read(document));
+        if (secondaryCursor != null) {
+            result.put("secondaryCursor", secondaryCursor.read(document));
+        }
+        return result;
+    }
+
     public String toStringOffset(CursorField cursor, CursorField secondaryCursor, String index, Map<String, Object> document) {
         String cursorValue = cursor.read(document);
         if (secondaryCursor == null) {
