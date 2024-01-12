@@ -279,6 +279,8 @@ public class ElasticSourceTask extends SourceTask {
 
             documentFilters.forEach(jsonFilter -> jsonFilter.filter(elasticDocument));
 
+            // converter 참고 문서 : https://www.confluent.io/ko-kr/blog/kafka-connect-deep-dive-converters-serialization-explained/
+
             /**
              * schemaLess 로 인해 주석 처리
              *
