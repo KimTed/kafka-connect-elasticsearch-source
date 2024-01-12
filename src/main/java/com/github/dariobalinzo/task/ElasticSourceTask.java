@@ -29,12 +29,19 @@ import com.github.dariobalinzo.filter.DocumentFilter;
 import com.github.dariobalinzo.filter.JsonCastFilter;
 import com.github.dariobalinzo.filter.WhitelistFilter;
 import com.github.dariobalinzo.schema.*;
+import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CharsetEncoder;
+import java.nio.charset.StandardCharsets;
 import org.apache.kafka.common.config.ConfigException;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.source.SourceRecord;
 import org.apache.kafka.connect.source.SourceTask;
+import org.elasticsearch.common.geo.GeoJson;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -73,6 +80,10 @@ public class ElasticSourceTask extends SourceTask {
     private String pivotCursor;
     private final List<DocumentFilter> documentFilters = new ArrayList<>();
 
+    private final Gson gson = new GsonBuilder().disableHtmlEscaping().create();
+
+    private final CharsetEncoder encoder = StandardCharsets.UTF_8.newEncoder();
+
     @Override
     public String version() {
         return Version.VERSION;
@@ -89,13 +100,13 @@ public class ElasticSourceTask extends SourceTask {
         indices = Arrays.asList(config.getString(ElasticSourceTaskConfig.INDICES_CONFIG).split(","));
         if (indices.isEmpty()) {
             throw new ConnectException("Invalid configuration: each ElasticSourceTask must have at "
-                    + "least one index assigned to it");
+                + "least one index assigned to it");
         }
 
         topic = config.getString(ElasticSourceConnectorConfig.TOPIC_PREFIX_CONFIG);
         cursorSearchField = config.getString(ElasticSourceConnectorConfig.INCREMENTING_FIELD_NAME_CONFIG);
         Objects.requireNonNull(cursorSearchField, ElasticSourceConnectorConfig.INCREMENTING_FIELD_NAME_CONFIG
-                + " conf is mandatory");
+            + " conf is mandatory");
         cursorField = new CursorField(cursorSearchField);
         secondaryCursorSearchField = config.getString(ElasticSourceConnectorConfig.SECONDARY_INCREMENTING_FIELD_NAME_CONFIG);
         secondaryCursorField = secondaryCursorSearchField == null ? null : new CursorField(secondaryCursorSearchField);
@@ -158,15 +169,15 @@ public class ElasticSourceTask extends SourceTask {
         int batchSize = Integer.parseInt(config.getString(ElasticSourceConnectorConfig.BATCH_MAX_ROWS_CONFIG));
 
         int maxConnectionAttempts = Integer.parseInt(config.getString(
-                ElasticSourceConnectorConfig.CONNECTION_ATTEMPTS_CONFIG
+            ElasticSourceConnectorConfig.CONNECTION_ATTEMPTS_CONFIG
         ));
         long connectionRetryBackoff = Long.parseLong(config.getString(
-                ElasticSourceConnectorConfig.CONNECTION_BACKOFF_CONFIG
+            ElasticSourceConnectorConfig.CONNECTION_BACKOFF_CONFIG
         ));
         ElasticConnectionBuilder connectionBuilder = new ElasticConnectionBuilder(esHost, esPort)
-                .withProtocol(esScheme)
-                .withMaxAttempts(maxConnectionAttempts)
-                .withBackoff(connectionRetryBackoff);
+            .withProtocol(esScheme)
+            .withMaxAttempts(maxConnectionAttempts)
+            .withBackoff(connectionRetryBackoff);
 
         String truststore = config.getString(ElasticSourceConnectorConfig.ES_TRUSTSTORE_CONF);
         String truststorePass = config.getString(ElasticSourceConnectorConfig.ES_TRUSTSTORE_PWD_CONF);
@@ -185,8 +196,8 @@ public class ElasticSourceTask extends SourceTask {
             es = connectionBuilder.build();
         } else {
             es = connectionBuilder.withUser(esUser)
-                    .withPassword(esPwd)
-                    .build();
+                                  .withPassword(esPwd)
+                                  .build();
         }
 
         elasticRepository = new ElasticRepository(es, cursorSearchField, secondaryCursorSearchField);
@@ -205,8 +216,8 @@ public class ElasticSourceTask extends SourceTask {
                     Cursor lastValue = fetchLastOffset(index, pivotCursor);
                     logger.info("found last value {}", lastValue);
                     PageResult pageResult = secondaryCursorSearchField == null ?
-                            elasticRepository.searchAfter(index, lastValue) :
-                            elasticRepository.searchAfterWithSecondarySort(index, lastValue);
+                                            elasticRepository.searchAfter(index, lastValue) :
+                                            elasticRepository.searchAfterWithSecondarySort(index, lastValue);
                     parseResult(pageResult, results);
                     logger.info("index {} total messages: {} ", index, sent.get(index));
                 }
@@ -223,8 +234,9 @@ public class ElasticSourceTask extends SourceTask {
     }
 
     private Cursor fetchLastOffset(String index) {
-        return this.fetchLastOffset(index,null);
+        return this.fetchLastOffset(index, null);
     }
+
     private Cursor fetchLastOffset(String index, String pivotCursor) {
         //first we check in cache memory the last value
         if (lastCursor.get(index) != null) {
@@ -238,47 +250,69 @@ public class ElasticSourceTask extends SourceTask {
             String secondaryCursor = (String) offset.get(POSITION_SECONDARY);
             return new Cursor(primaryCursor, secondaryCursor);
         } else {
-            if ( null != pivotCursor && !"".equals(pivotCursor.trim())) {
+            if (null != pivotCursor && !"".equals(pivotCursor.trim())) {
                 return new Cursor(pivotCursor, pivotCursor);
             }
             return Cursor.empty();
         }
     }
 
-    private void parseResult(PageResult pageResult, List<SourceRecord> results) {
+    private void parseResult(PageResult pageResult, List<SourceRecord> results) throws Exception {
         String index = pageResult.getIndex();
         for (Map<String, Object> elasticDocument : pageResult.getDocuments()) {
             Map<String, String> sourcePartition = Collections.singletonMap(INDEX, index);
             Map<String, String> sourceOffset = offsetSerializer.toMapOffset(
-                    cursorField,
-                    secondaryCursorField,
-                    elasticDocument
+                cursorField,
+                secondaryCursorField,
+                elasticDocument
             );
             Object key = offsetSerializer.toMapOffset(
-                    cursorField,
-                    secondaryCursorField,
-                    index,
-                    elasticDocument
+                cursorField,
+                secondaryCursorField,
+                index,
+                elasticDocument
             );
 
             lastCursor.put(index, pageResult.getLastCursor());
+
             sent.merge(index, 1, Integer::sum);
 
             documentFilters.forEach(jsonFilter -> jsonFilter.filter(elasticDocument));
 
-            Schema schema = schemaConverter.convert(elasticDocument, index);
-            Struct struct = structConverter.convert(elasticDocument, schema);
+            /**
+             * schemaLess 로 인해 주석 처리
+             *
+             Schema schema = schemaConverter.convert(elasticDocument, index);
+             Struct struct = structConverter.convert(elasticDocument, schema);
+             */
+
+
+            /**
+            // Common > Value converter class 에 StringConverter 셋팅할 경우
+            // org.apache.kafka.connect.storage.StringConverter
+            */
+            String jsonStr = gson.toJson(elasticDocument);
+
+            /**
+            // Common > Value converter class 에 ByteArrayConverter 셋팅할 경우
+            // org.apache.kafka.connect.converters.ByteArrayConverter
+            // Schema.BYTES_SCHEMA 로 설정
+            // value 에 아래걸로 변경 (둘중 하나 선택)
+            byte[] byteArr = encoder.encode(CharBuffer.wrap(jsonStr)).array();
+            byte[] byteArr = jsonStr.getBytes(StandardCharsets.UTF_8);
+            */
 
             SourceRecord sourceRecord = new SourceRecord(
-                    sourcePartition,
-                    sourceOffset,
-                    topic + index,
-                    //KEY
-                    Schema.STRING_SCHEMA,
-                    key,
-                    //VALUE
-                    schema,
-                    struct);
+                sourcePartition,
+                sourceOffset,
+                topic + index,
+                //KEY
+                Schema.STRING_SCHEMA,
+                key,
+                //VALUE
+                Schema.STRING_SCHEMA,
+                jsonStr);
+
             results.add(sourceRecord);
         }
     }

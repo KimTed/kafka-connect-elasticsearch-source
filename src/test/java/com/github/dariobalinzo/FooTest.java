@@ -39,6 +39,5 @@ public class FooTest {
         Schema schema = schemaConverter.convert(elasticDocument, "foo");
         Struct struct = structConverter.convert(elasticDocument, schema);
 
-        System.out.println(struct);
     }
 }

@@ -74,7 +74,7 @@ public final class ElasticRepository {
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
                 .query(queryBuilder)
                 .size(pageSize)
-                .sort(cursorSearchField, SortOrder.ASC);
+                .sort(cursorSearchField, SortOrder.DESC);
 
         SearchRequest searchRequest = new SearchRequest(index)
                 .source(searchSourceBuilder);
@@ -115,8 +115,8 @@ public final class ElasticRepository {
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
                 .query(queryBuilder)
                 .size(pageSize)
-                .sort(cursorSearchField, SortOrder.ASC)
-                .sort(secondaryCursorSearchField, SortOrder.ASC);
+                .sort(cursorSearchField, SortOrder.DESC)
+                .sort(secondaryCursorSearchField, SortOrder.DESC);
 
         SearchRequest searchRequest = new SearchRequest(index)
                 .source(searchSourceBuilder);

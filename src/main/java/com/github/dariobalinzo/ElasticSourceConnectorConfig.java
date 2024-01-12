@@ -156,7 +156,6 @@ public class ElasticSourceConnectorConfig extends AbstractConfig {
     public static final String PIVOT_CURSOR_DOC = "강제 설정 날짜 (mod_dttm)";
 
     public static final ConfigDef CONFIG_DEF = baseConfigDef();
-
     protected static ConfigDef baseConfigDef() {
         ConfigDef config = new ConfigDef();
         addDatabaseOptions(config);
