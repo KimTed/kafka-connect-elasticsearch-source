@@ -1,24 +1,34 @@
 /**
  * Copyright © 2018 Dario Balinzo (dariobalinzo@gmail.com)
  * <p>
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with the License. You may obtain a copy of the License at
  * <p>
  * http://www.apache.org/licenses/LICENSE-2.0
  * <p>
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+ * implied. See the License for the specific language governing permissions and limitations under the License.
  */
 
 package com.github.dariobalinzo.elastic;
 
+import static org.elasticsearch.index.query.QueryBuilders.boolQuery;
+import static org.elasticsearch.index.query.QueryBuilders.matchAllQuery;
+import static org.elasticsearch.index.query.QueryBuilders.matchQuery;
+import static org.elasticsearch.index.query.QueryBuilders.rangeQuery;
+
 import com.github.dariobalinzo.elastic.response.Cursor;
 import com.github.dariobalinzo.elastic.response.PageResult;
-import org.apache.commons.codec.binary.StringUtils;
+import java.io.BufferedReader;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.stream.Collectors;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.client.Request;
@@ -31,16 +41,8 @@ import org.elasticsearch.search.sort.SortOrder;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.BufferedReader;
-import java.io.IOException;
-import java.io.InputStreamReader;
-import java.util.*;
-import java.util.stream.Collectors;
-
-import static com.github.dariobalinzo.elastic.ElasticJsonNaming.removeKeywordSuffix;
-import static org.elasticsearch.index.query.QueryBuilders.*;
-
 public final class ElasticRepository {
+
     private final static Logger logger = LoggerFactory.getLogger(ElasticRepository.class);
 
     private final ElasticConnection elasticConnection;
@@ -51,7 +53,6 @@ public final class ElasticRepository {
     private final CursorField secondaryCursorField;
 
     private int pageSize = 5000;
-    private final int MAX_SEARCH_LIMIT = 10000;
 
     public ElasticRepository(ElasticConnection elasticConnection) {
         this(elasticConnection, "_id");
@@ -70,68 +71,43 @@ public final class ElasticRepository {
     }
 
     public PageResult searchAfter(String index, Cursor cursor) throws IOException, InterruptedException {
-        System.out.println("@@@@@@@@@@@@@@@ searchAfter() call @@@@@@@@@@@@@@");
-        QueryBuilder queryBuilder = cursor.getPrimaryCursor() == null ?
-                matchAllQuery() :
-                buildGreaterThen(cursorSearchField, cursor.getPrimaryCursor());
+        QueryBuilder queryBuilder = cursor.getPrimaryCursor() == null ? matchAllQuery() : buildGreaterThen(cursorSearchField, cursor.getPrimaryCursor());
 
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
-                .query(queryBuilder)
-                .size(pageSize)
-//                .sort(cursorSearchField, SortOrder.DESC)
-                .sort("_id", SortOrder.DESC)
-                .trackTotalHits(true);
+            .query(queryBuilder)
+            .size(pageSize)
+            .sort("_id", SortOrder.DESC)
+            .trackTotalHits(true);
 
         int totalCount = 0;
         List<Map<String, Object>> documents = new ArrayList<>();
         List<String> pivotIdList = new ArrayList<>();
-        List<String> dupIdList = new ArrayList<>();
-int tmp = 0;
+
         do {
-            tmp++;
             SearchRequest searchRequest = new SearchRequest(index)
                 .source(searchSourceBuilder);
 
             SearchResponse response = executeSearch(searchRequest);
-            System.out.println("Hits is null ? " + response.getHits());
-            System.out.println("getTotalHits is null ? " + response.getHits().getTotalHits());
             totalCount = (int) response.getHits().getTotalHits().value;
 
-            System.out.println("totalCount : " + totalCount + "   pageSize : " + pageSize);
             if (totalCount > pageSize) {
-                System.out.println("실제 쿼리 : " + searchRequest.source().toString());
-                System.out.println("######### next val ##### " + Arrays.toString( Arrays.stream(response.getHits().getHits())
-                                                                                        .sorted(Comparator.comparing(SearchHit::getId))
-//                                                                                 .reversed())
-                                                                                        .findFirst()
-                                                                                        .get()
-                                                                                        .getSortValues()));
-//                pageSize = totalCount > MAX_SEARCH_LIMIT ? MAX_SEARCH_LIMIT : totalCount;
-                searchSourceBuilder
-//                    .size(pageSize)
-                    .searchAfter(Arrays.stream(response.getHits().getHits())
-                                       .sorted(Comparator.comparing(SearchHit::getId))
-//                                                         .reversed())
-                                       .findFirst()
-                                       .get()
-                                       .getSortValues());
-                System.out.println("###############조회 길이 : " +  response.getHits().getHits().length);
+                searchSourceBuilder.searchAfter(Arrays.stream(response.getHits().getHits())
+                                                      .sorted(Comparator.comparing(SearchHit::getId))
+//                                                         .reversed()) // search sort 가 .sort("_id", SortOrder.DESC) 이기 때문
+                                                      .findFirst()
+                                                      .get()
+                                                      .getSortValues());
             }
-            System.out.println(" loop 횟수: " + tmp);
             List<Map<String, Object>> searchList = extractDocuments(response);
-            pivotIdList.addAll(searchList.stream().filter(e -> !pivotIdList.contains((String)e.get("es-id"))).map(e -> (String)e.get("es-id")).collect(Collectors.toList()));
-            dupIdList.addAll(searchList.stream().filter(e -> pivotIdList.contains((String)e.get("es-id"))).map(e -> (String)e.get("es-id")).collect(Collectors.toList()));
-            documents.addAll(searchList.stream().filter(e -> pivotIdList.contains((String)e.get("es-id"))).collect(Collectors.toList()));
-            List<String> test = documents.stream().map(e -> (String)e.get("es-id")).collect(Collectors.toList());
-            System.out.println("test : " + test);
-            // TODO: 확인용
-            System.out.println("######## documents size ########" + documents.size());
-            System.out.println("pivotIdList size : " + pivotIdList.size() + " dupIdList size : " + dupIdList.size());
+            pivotIdList.addAll(searchList.stream()
+                                         .filter(e -> !pivotIdList.contains((String) e.get("es-id")))
+                                         .map(e -> (String) e.get("es-id"))
+                                         .collect(Collectors.toList()));
+            documents.addAll(searchList.stream()
+                                       .filter(e -> pivotIdList.contains((String) e.get("es-id")))
+                                       .collect(Collectors.toList()));
+        } while (documents.size() != 0 && !(documents.size() >= totalCount));
 
-        }while (documents.size() != 0 && !(documents.size() >= totalCount));
-
-
-        System.out.println("do 탈출 !!!!!");
         Cursor lastCursor;
         if (documents.isEmpty()) {
             lastCursor = Cursor.empty();
@@ -140,18 +116,16 @@ int tmp = 0;
             lastCursor = new Cursor(cursorField.read(lastDocument));
         }
 
-        System.out.println("######## 최종 size ########" + documents.size());
         return new PageResult(index, documents, lastCursor);
     }
 
     private List<Map<String, Object>> extractDocuments(SearchResponse response) {
-        return Arrays.stream(response.getHits().getHits())
-                .map(hit -> {
-                    Map<String, Object> sourceMap = hit.getSourceAsMap();
-                    sourceMap.put("es-id", hit.getId());
-                    sourceMap.put("es-index", hit.getIndex());
-                    return sourceMap;
-                }).collect(Collectors.toList());
+        return Arrays.stream(response.getHits().getHits()).map(hit -> {
+            Map<String, Object> sourceMap = hit.getSourceAsMap();
+            sourceMap.put("es-id", hit.getId());
+            sourceMap.put("es-index", hit.getIndex());
+            return sourceMap;
+        }).collect(Collectors.toList());
     }
 
     public PageResult searchAfterWithSecondarySort(String index, Cursor cursor) throws IOException, InterruptedException {
@@ -160,24 +134,41 @@ int tmp = 0;
         String secondaryCursor = cursor.getSecondaryCursor();
         boolean noPrevCursor = primaryCursor == null && secondaryCursor == null;
 
-        QueryBuilder queryBuilder = noPrevCursor ? matchAllQuery() :
-                getSecondarySortFieldQuery(primaryCursor, secondaryCursor);
+        QueryBuilder queryBuilder = noPrevCursor ? matchAllQuery() : getSecondarySortFieldQuery(primaryCursor, secondaryCursor);
 
         SearchSourceBuilder searchSourceBuilder = new SearchSourceBuilder()
-                .query(queryBuilder)
-                .size(pageSize)
-//                .sort(cursorSearchField, SortOrder.DESC)
-//                .sort(secondaryCursorSearchField, SortOrder.DESC)
-                .sort("_id", SortOrder.DESC)
-                .trackTotalHits(true);
+            .query(queryBuilder)
+            .size(pageSize)
+            .sort("_id", SortOrder.DESC)
+            .trackTotalHits(true);
 
-        SearchRequest searchRequest = new SearchRequest(index)
-                .source(searchSourceBuilder);
+        int totalCount = 0;
+        List<Map<String, Object>> documents = new ArrayList<>();
+        List<String> pivotIdList = new ArrayList<>();
 
-        SearchResponse response = executeSearch(searchRequest);
-        System.out.println("####### searchAfterWithSecondarySort #### response.totalhits : " + (int)response.getHits().getTotalHits().value);
+        do {
+            SearchRequest searchRequest = new SearchRequest(index).source(searchSourceBuilder);
 
-        List<Map<String, Object>> documents = extractDocuments(response);
+            SearchResponse response = executeSearch(searchRequest);
+            totalCount = (int) response.getHits().getTotalHits().value;
+
+            if (totalCount > pageSize) {
+                searchSourceBuilder.searchAfter(Arrays.stream(response.getHits().getHits())
+                                                      .sorted(Comparator.comparing(SearchHit::getId))
+                                                      .findFirst()
+                                                      .get()
+                                                      .getSortValues());
+            }
+            List<Map<String, Object>> searchList = extractDocuments(response);
+            pivotIdList.addAll(searchList.stream()
+                                         .filter(e -> !pivotIdList.contains((String) e.get("es-id")))
+                                         .map(e -> (String) e.get("es-id"))
+                                         .collect(Collectors.toList()));
+            documents.addAll(searchList.stream()
+                                       .filter(e -> pivotIdList.contains((String) e.get("es-id")))
+                                       .collect(Collectors.toList()));
+
+        } while (documents.size() != 0 && !(documents.size() >= totalCount));
 
         Cursor lastCursor;
         if (documents.isEmpty()) {
@@ -192,26 +183,15 @@ int tmp = 0;
     }
 
     private QueryBuilder buildGreaterThen(String cursorField, String cursorValue) {
-//        return rangeQuery(cursorField).from(cursorValue, false);
-
-        return termQuery("mod_dttm", "2021-03-03 01:22:02");
-//        return rangeQuery(cursorField)
-//            .from("2021-03-03 01:22:02", true)
-//            .to("2021-03-03 01:22:02", true);
+        return rangeQuery(cursorField).from(cursorValue, false);
     }
 
     private QueryBuilder getSecondarySortFieldQuery(String primaryCursor, String secondaryCursor) {
         if (secondaryCursor == null) {
             return buildGreaterThen(cursorSearchField, primaryCursor);
         }
-        return boolQuery()
-                .minimumShouldMatch(1)
-                .should(buildGreaterThen(cursorSearchField, primaryCursor))
-                .should(
-                        boolQuery()
-                                .filter(matchQuery(cursorSearchField, primaryCursor))
-                                .filter(buildGreaterThen(secondaryCursorSearchField, secondaryCursor))
-                );
+        return boolQuery().minimumShouldMatch(1).should(buildGreaterThen(cursorSearchField, primaryCursor))
+                          .should(boolQuery().filter(matchQuery(cursorSearchField, primaryCursor)).filter(buildGreaterThen(secondaryCursorSearchField, secondaryCursor)));
     }
 
     private SearchResponse executeSearch(SearchRequest searchRequest) throws IOException, InterruptedException {
@@ -222,8 +202,7 @@ int tmp = 0;
         IOException lastError = null;
         for (int i = 0; i < maxTrials; ++i) {
             try {
-                return elasticConnection.getClient()
-                        .search(searchRequest, RequestOptions.DEFAULT);
+                return elasticConnection.getClient().search(searchRequest, RequestOptions.DEFAULT);
             } catch (IOException e) {
                 lastError = e;
                 Thread.sleep(elasticConnection.getConnectionRetryBackoff());
@@ -235,9 +214,7 @@ int tmp = 0;
     public List<String> catIndices(String prefix) {
         Response resp;
         try {
-            resp = elasticConnection.getClient()
-                    .getLowLevelClient()
-                    .performRequest(new Request("GET", "/_cat/indices"));
+            resp = elasticConnection.getClient().getLowLevelClient().performRequest(new Request("GET", "/_cat/indices"));
         } catch (IOException e) {
             logger.error("error in searching index names");
             throw new RuntimeException(e);
@@ -264,9 +241,7 @@ int tmp = 0;
 
     public void refreshIndex(String index) {
         try {
-            elasticConnection.getClient()
-                    .getLowLevelClient()
-                    .performRequest(new Request("POST", "/" + index + "/_refresh"));
+            elasticConnection.getClient().getLowLevelClient().performRequest(new Request("POST", "/" + index + "/_refresh"));
         } catch (IOException e) {
             logger.error("error in refreshing index " + index);
             throw new RuntimeException(e);
